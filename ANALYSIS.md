@@ -53,7 +53,9 @@ Trois stratégies principales ont été explorées dans les scripts de modélisa
 - **Diversité des modèles :** Combinaison de XGBoost, LightGBM et CatBoost pour capturer des signaux variés.
 - **Validation robuste :** Respect strict de la chronologie pour les splits de validation.
 
-### Recommandations
-- **Optimisation des hyperparamètres :** Poursuivre le réglage fin (Fine-Tuning) des paramètres spécifiques pour chaque composant de l'ensemble (notamment `max_depth` et `learning_rate` pour XGBoost).
-- **Analyse des erreurs :** Étudier les faux positifs et faux négatifs au sein de `op_03` pour identifier de nouvelles features discriminantes.
-- **Stabilité temporelle :** Vérifier si les performances sont stables à travers les dernières périodes de validation avant de prédire sur le test set final.
+### Recommandations et Pistes d'Amélioration
+- **Feature Engineering Temporel Fin** : Ajouter des statistiques glissantes sur des fenêtres plus courtes (ex: 5 dernières transactions) pour détecter des rafales (bursts) de fraude.
+- **Optimisation par Graphe** : Créer des variables mesurant la complexité du réseau de transactions autour d'un compte (ex: nombre de voisins distincts).
+- **Fine-Tuning avec Optuna** : Automatiser la recherche d'hyperparamètres pour chaque modèle de l'ensemble afin de grappiller des points de PR-AUC.
+- **Calibration des Modèles** : Utiliser Isotonic Regression pour s'assurer que les probabilités prédites sont bien calibrées, ce qui améliore la qualité du blending.
+- **Analyse de Stabilité** : Vérifier que les features les plus importantes (Feature Importance) restent stables à travers le temps pour éviter la dégradation du modèle en production (drift).
