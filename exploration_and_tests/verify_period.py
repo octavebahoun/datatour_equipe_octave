@@ -5,8 +5,8 @@ Projet: Hackathon Détection de Fraude Mobile Money
 
 import pandas as pd
 
-train = pd.read_csv("/home/precieux/datatour/dataset/train.csv")
-test = pd.read_csv("/home/precieux/datatour/dataset/test.csv")
+train = pd.read_csv("dataset/train.csv")
+test = pd.read_csv("dataset/test.csv")
 
 print("Train periods:")
 print(f"Min: {train['period'].min()}, Max: {train['period'].max()}")

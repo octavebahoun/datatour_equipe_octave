@@ -5,8 +5,8 @@ import lightgbm as lgb
 import time
 
 print("Loading datasets...")
-train_raw = pd.read_csv("/home/precieux/datatour/dataset/train.csv")
-test_raw = pd.read_csv("/home/precieux/datatour/dataset/test.csv")
+train_raw = pd.read_csv("dataset/train.csv")
+test_raw = pd.read_csv("dataset/test.csv")
 
 print(f"Train shape: {train_raw.shape}")
 print(f"Test shape: {test_raw.shape}")
@@ -182,7 +182,7 @@ pred_df = pd.DataFrame({
 })
 
 # Load the original test set to preserve exact row count and ID ordering
-orig_test = pd.read_csv("/home/precieux/datatour/dataset/test.csv")
+orig_test = pd.read_csv("dataset/test.csv")
 submission = orig_test[['id']].merge(pred_df, on='id', how='left')
 
 # 4. Post-processing: force target = 0.0 for all operations except op_03
@@ -193,5 +193,5 @@ submission.loc[is_not_op3, 'target'] = 0.0
 # Verify no NaNs in target
 assert submission['target'].isna().sum() == 0, "Error: Target contains NaN values!"
 
-submission.to_csv("/home/precieux/datatour/submission.csv", index=False)
-print("Submission file successfully created at /home/precieux/datatour/submission.csv!")
+submission.to_csv("submission.csv", index=False)
+print("Submission file successfully created at submission.csv!")
