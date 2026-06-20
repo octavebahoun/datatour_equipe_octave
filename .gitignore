@@ -1,17 +1,35 @@
+# Dependencies
 **/node_modules/
 **/vendor/
-**/__pycache__/
-**/.env
-**/*.log
-**/venv/
-**/dataset/
-**/submissionerr.csv
-**/node_modules/
-**/vendor/
-**/__pycache__/
-**/.env
-**/*.log
+**/.venv/
 **/venv/
 
+# Python
+**/__pycache__/
+*.pyc
+
+# Environment
+**/.env
+
+# Logs
+**/*.log
+logs*.txt
+
+# Data files
+**/dataset/
 *.csv
 *.zip
+*.pkl
+*.h5
+*.model
+*.joblib
+*.parquet
+
+# Training artifacts
+**/catboost_info/
+**/mlruns/
+
+# IDE
+.idea/
+.vscode/
+*.swp
