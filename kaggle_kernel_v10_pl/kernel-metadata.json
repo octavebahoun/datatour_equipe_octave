@@ -1,0 +1,15 @@
+{
+  "id": "octavebahoun/datour-fraud-v10-pl",
+  "title": "datour-fraud-v10-pl",
+  "code_file": "train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "octavebahoun/dataset"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}
