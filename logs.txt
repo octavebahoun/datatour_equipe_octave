@@ -1,0 +1,24 @@
+[{"stream_name":"stdout","time":0.883006195,"data":"Current working directory: /kaggle/working\n"}
+,{"stream_name":"stdout","time":0.883064915,"data":"Files in current directory: []\n"}
+,{"stream_name":"stdout","time":0.883092815,"data":"Files in /kaggle/input: ['datasets']\n"}
+,{"stream_name":"stdout","time":0.883097195,"data":"Contents of /kaggle/input/datasets: ['octavebahoun']\n"}
+,{"stream_name":"stdout","time":0.883101225,"data":"All env variables:\n"}
+,{"stream_name":"stdout","time":0.883142155,"data":"KAGGLE_DATA_PROXY_TOKEN: eyJhbGciOiJBMTI4S1ciLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0.LU4n9xHRlWOV-783f75pDfBQAnZZp-K_7merUB_uFFbMvTgeIr6QHg.lbwv32hZs-DhXz5QyTxmDQ.7vA3kfgmGxsgJt65um5UHIs7oSp60uYlYlLOnePYLIvmkFiyvYkoRq1niHu3_gmgWOBlknmpQQvUPIM-_IPvj68mAwxz3dVbQSAcGCJpst0Bf39T0SaT37O4IGw2usUEpvQ-ijDjegW_erGFXSLPPhS2xQdh0j4K8lu-Vzo1baY1dyntpjDofKv7MEvZaryTHwXS7MXc-bmIMhXCzYUddKG6_wZcC2xQgCCdOvBl2qdV7-kpBR9vB3UtNxVW4xqFlvJKLEUX6ZgF_qw0nYaza9hn4XSv5FlH3_wDG-FWl2nNCd6jYjB8MSTvbBkeu1Ra.yQGMgeb4lPfd9CBAYtL-qw\n"}
+,{"stream_name":"stdout","time":0.883150375,"data":"KAGGLE_URL_BASE: https://api.kaggle.com\n"}
+,{"stream_name":"stdout","time":0.883154345,"data":"KAGGLE_DOCKER_IMAGE: gcr.io/kaggle-images/python@sha256:e5452ce6268c2e8345cfe5141f31ca7ff47032aca46a7ea532bbb87481281d0c\n"}
+,{"stream_name":"stdout","time":0.883158335,"data":"KAGGLE_KERNEL_INTEGRATIONS: \n"}
+,{"stream_name":"stdout","time":0.883162495,"data":"KAGGLE_DATA_PROXY_PROJECT: kaggle-161607\n"}
+,{"stream_name":"stdout","time":0.883166306,"data":"KAGGLE_USER_SECRETS_TOKEN: eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..LRdiup1Y-etg_t_RWbK4Gw.Mer8FBlqlpV7LoNW3RgFZ-CqZ1jUC30qjEQ1yINwCmXZb5mepfU7tVbJT9xuKuW6L5hN0dDvVbQUvvuVomu6PleZbm-tBsPS62Il1PlOgqzEO_7a6CRsC14ve6MBUKZfFX0v1h5OguTZmPu8SB2UCQ.VAqf9WybkPJ9CLYqZHiloQ\n"}
+,{"stream_name":"stdout","time":0.883170286,"data":"KAGGLE_KERNEL_RUN_TYPE: Batch\n"}
+,{"stream_name":"stdout","time":0.883173815,"data":"KAGGLE_GCP_ZONE: asia-east1-a\n"}
+,{"stream_name":"stdout","time":0.883175965,"data":"KAGGLE_CONTAINER_NAME: kaggle_pNOoXMhvEJ2H9rHOMLETRLa3sXcjJqvVKyz750D7j4-328630324-webtier\n"}
+,{"stream_name":"stdout","time":0.883178135,"data":"KAGGLE_API_V1_TOKEN: /etc/secrets/kaggle/api-v1-token\n"}
+,{"stream_name":"stdout","time":0.883180275,"data":"KAGGLE_GRPC_DATA_PROXY_URL: dp.kaggle.net:443\n"}
+,{"stream_name":"stdout","time":0.883182365,"data":"KAGGLE_DATA_PROXY_URL: https://dp.kaggle.net\n"}
+,{"stream_name":"stderr","time":3.373311605,"data":"/usr/local/lib/python3.12/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\\|'\n"}
+,{"stream_name":"stderr","time":3.373356865,"data":"  cells[i][c] = re.sub('\\\\\\\\\\|', '|', cell)\n"}
+,{"stream_name":"stderr","time":3.810778079,"data":"/usr/local/lib/python3.12/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\\_'\n"}
+,{"stream_name":"stderr","time":3.810814299,"data":"  text = re.sub(r'_', '\\_', text) # Escape underscores in display text\n"}
+,{"stream_name":"stderr","time":5.557625423,"data":"[NbConvertApp] Converting notebook __script__.ipynb to html\n"}
+,{"stream_name":"stderr","time":6.980526687,"data":"[NbConvertApp] Writing 276078 bytes to __results__.html\n"}
+]
