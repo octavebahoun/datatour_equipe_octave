@@ -11,7 +11,7 @@ from sklearn.metrics import average_precision_score
 import time
 
 print("Loading data...")
-train = pd.read_csv("/home/precieux/datatour/dataset/train.csv")
+train = pd.read_csv("dataset/train.csv")
 
 # Sort by period to be safe
 train = train.sort_values('period').reset_index(drop=True)

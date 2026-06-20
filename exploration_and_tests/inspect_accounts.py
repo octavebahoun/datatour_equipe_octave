@@ -6,8 +6,8 @@ Projet: Hackathon Détection de Fraude Mobile Money
 import pandas as pd
 import numpy as np
 
-train = pd.read_csv("/home/precieux/datatour/dataset/train.csv")
-test = pd.read_csv("/home/precieux/datatour/dataset/test.csv")
+train = pd.read_csv("dataset/train.csv")
+test = pd.read_csv("dataset/test.csv")
 
 print("Origin account stats in Train:")
 orig_counts = train['origin_account'].value_counts()

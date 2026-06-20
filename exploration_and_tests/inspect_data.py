@@ -6,8 +6,8 @@ Projet: Hackathon Détection de Fraude Mobile Money
 import pandas as pd
 import numpy as np
 
-train_path = "/home/precieux/datatour/dataset/train.csv"
-test_path = "/home/precieux/datatour/dataset/test.csv"
+train_path = "dataset/train.csv"
+test_path = "dataset/test.csv"
 
 print("Loading train...")
 train = pd.read_csv(train_path)

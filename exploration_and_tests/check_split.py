@@ -5,7 +5,7 @@ Projet: Hackathon Détection de Fraude Mobile Money
 
 import pandas as pd
 
-train = pd.read_csv("/home/precieux/datatour/dataset/train.csv")
+train = pd.read_csv("dataset/train.csv")
 
 print("Rows per period range:")
 train_split = train[train['period'] <= 90]
