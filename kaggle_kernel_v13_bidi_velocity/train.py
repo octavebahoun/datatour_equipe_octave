@@ -10,10 +10,10 @@ import time, os, warnings, gc
 warnings.filterwarnings('ignore')
 
 t0 = time.time()
-print("=== V13: Bidirectional Edge & Velocity Analysis ===")
+print("=== V13 : Analyse d'arêtes bidirectionnelles et de vitesse ===")
 
 # ============================================================
-# LOAD DATA
+# CHARGEMENT DES DONNÉES
 # ============================================================
 if os.path.exists("/kaggle/input/datasets/octavebahoun/dataset"):
     train_raw = pd.read_csv("/kaggle/input/datasets/octavebahoun/dataset/train.csv")
@@ -33,9 +33,13 @@ combined = pd.concat([train_raw, test_raw], axis=0).sort_values('period').reset_
 eps = 1e-6
 
 # ============================================================
-# FEATURE ENGINEERING
+# INGÉNIERIE DES CARACTÉRISTIQUES (FEATURE ENGINEERING)
 # ============================================================
 def compute_chronological_te(df, group_col, target_col, smoothing=10):
+    """
+    Calcule le Target Encoding chronologique pour éviter le data leakage.
+    Seules les données des périodes antérieures sont utilisées pour encoder la période courante.
+    """
     period_stats = df.groupby([group_col, 'period'])[target_col].agg(['sum', 'count']).reset_index()
     period_stats = period_stats.sort_values([group_col, 'period'])
     period_stats['cum_sum'] = period_stats.groupby(group_col)['sum'].cumsum()
@@ -56,7 +60,7 @@ def compute_chronological_te(df, group_col, target_col, smoothing=10):
     df_merged = df.merge(period_stats[[group_col, 'period', 'te']], on=[group_col, 'period'], how='left')
     return df_merged['te']
 
-print("Building base features...")
+print("Construction des caractéristiques de base...")
 combined["amount_log1p"] = np.log1p(np.maximum(combined["amount"], 0))
 combined["origin_balance_change"] = combined["origin_balance_after"] - combined["origin_balance_before"]
 combined["destination_balance_change"] = combined["destination_balance_after"] - combined["destination_balance_before"]
@@ -66,12 +70,12 @@ combined["origin_no_change"] = (combined["origin_balance_change"].abs() < 0.1).a
 combined["destination_no_change"] = (combined["destination_balance_change"].abs() < 0.1).astype(int)
 combined["amount_equals_origin_before"] = ((combined["amount"] - combined["origin_balance_before"]).abs() < 0.1).astype(int)
 
-# V11 Features
+# Caractéristiques V11
 combined['edge_id'] = combined['origin_account'].astype(str) + "_" + combined['destination_account'].astype(str)
 combined['is_round_1000'] = (combined['amount'] % 1000 == 0).astype(int)
 combined['is_round_5000'] = (combined['amount'] % 5000 == 0).astype(int)
 
-# V12 Features
+# Caractéristiques V12
 combined['edge_time_diff'] = (combined['period'] - combined.groupby('edge_id')['period'].shift(1)).fillna(999)
 combined['prev_edge_amount'] = combined.groupby('edge_id')['amount'].shift(1)
 combined['is_repeated_amount_on_edge'] = (combined['amount'] == combined['prev_edge_amount']).astype(int)
@@ -79,19 +83,19 @@ combined.drop(columns=['prev_edge_amount'], inplace=True)
 combined['edge_cum_tx_count'] = combined.groupby('edge_id').cumcount()
 combined['edge_cum_amount_sum'] = combined.groupby('edge_id')['amount'].cumsum() - combined['amount']
 
-# 🚀 NOUVELLES FEATURES V13 (Bidirectional & Velocity)
-print("Computing V13 Bidirectional & Velocity features...")
-# 1. Bidi Edge (Ping-Pong)
+# 🚀 NOUVELLES CARACTÉRISTIQUES V13 (Bidirectionnelles & Vitesse)
+print("Calcul des caractéristiques V13 bidirectionnelles & vitesse...")
+# 1. Relation bidirectionnelle (indépendamment du sens origine -> destination pour détecter le ping-pong)
 bidi_min = np.minimum(combined['origin_account'].astype(str), combined['destination_account'].astype(str))
 bidi_max = np.maximum(combined['origin_account'].astype(str), combined['destination_account'].astype(str))
 combined['bidi_edge_id'] = bidi_min + "_" + bidi_max
 combined['bidi_cum_tx_count'] = combined.groupby('bidi_edge_id').cumcount()
 combined['bidi_cum_amount_sum'] = combined.groupby('bidi_edge_id')['amount'].cumsum() - combined['amount']
 
-# 2. Edge Velocity
+# 2. Vitesse de transaction sur l'arête (Edge Velocity)
 combined['edge_velocity'] = combined['amount'] / (combined['edge_time_diff'] + eps)
 
-# Base Account features (V8)
+# Caractéristiques fondamentales des comptes (V8)
 combined['orig_tx_idx'] = combined.groupby('origin_account').cumcount()
 combined['dest_tx_idx'] = combined.groupby('destination_account').cumcount()
 combined['orig_cum_amount'] = combined.groupby('origin_account')['amount'].cumsum() - combined['amount']
@@ -133,7 +137,7 @@ combined['dest_avg_amount'] = combined['dest_cum_amount_sum'] / (combined['dest_
 combined['amount_vs_orig_avg'] = combined['amount'] / (combined['orig_avg_amount'] + eps)
 combined['amount_vs_dest_avg'] = combined['amount'] / (combined['dest_avg_amount'] + eps)
 
-# 🚀 3. Out/In Ratios (V13)
+# 🚀 3. Ratios de distribution sortants/entrants (V13)
 combined['orig_avg_amount_per_dest'] = combined['orig_cum_amount_sum'] / (combined['orig_cum_unique_dests'] + 1)
 combined['dest_avg_amount_per_orig'] = combined['dest_cum_amount_sum'] / (combined['dest_cum_unique_origins'] + 1)
 
@@ -143,7 +147,7 @@ combined['dest_balance_ratio'] = combined['destination_balance_after'] / (combin
 combined['amount_velocity_orig'] = combined['amount'] / (combined['orig_time_diff'] + eps)
 combined['amount_velocity_dest'] = combined['amount'] / (combined['dest_time_diff'] + eps)
 
-print("Computing target encodings...")
+print("Calcul des target encodings chronologiques...")
 combined['origin_te'] = compute_chronological_te(combined, 'origin_account', 'fraud_flag', smoothing=10)
 combined['destination_te'] = compute_chronological_te(combined, 'destination_account', 'fraud_flag', smoothing=10)
 combined['edge_te'] = compute_chronological_te(combined, 'edge_id', 'fraud_flag', smoothing=5)
@@ -177,8 +181,8 @@ features = [
     "amount_velocity_orig", "amount_velocity_dest",
     "edge_id", "is_round_1000", "is_round_5000", "edge_te", 
     "edge_time_diff", "is_repeated_amount_on_edge", "edge_cum_tx_count", "edge_cum_amount_sum",
-    "bidi_cum_tx_count", "bidi_cum_amount_sum", "edge_velocity", # 🚀 V13
-    "orig_avg_amount_per_dest", "dest_avg_amount_per_orig" # 🚀 V13
+    "bidi_cum_tx_count", "bidi_cum_amount_sum", "edge_velocity", # 🚀 Caractéristiques V13
+    "orig_avg_amount_per_dest", "dest_avg_amount_per_orig" # 🚀 Caractéristiques V13
 ]
 
 cat_features = ["operation", "origin_account", "destination_account", "edge_id"]
@@ -186,10 +190,10 @@ xgb_features = [f for f in features if f != "edge_id"]
 cb_features = [f for f in features if f not in ["origin_account", "destination_account", "edge_id"]] 
 
 # ============================================================
-# TRAINING
+# ENTRAÎNEMENT DES MODÈLES DE BASE
 # ============================================================
 print("\n" + "="*50)
-print("TRAINING MODELS")
+print("ENTRAÎNEMENT DES MODÈLES")
 print("="*50)
 
 X_train = train_fe[features].reset_index(drop=True)
@@ -202,30 +206,31 @@ oof_xgb, oof_lgb, oof_cb = np.zeros(len(X_train)), np.zeros(len(X_train)), np.ze
 test_xgb, test_lgb, test_cb = np.zeros(len(X_test)), np.zeros(len(X_test)), np.zeros(len(X_test))
 
 for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
-    print(f"\n--- Fold {fold + 1} ---")
+    print(f"\n--- Plis (Fold) {fold + 1} ---")
     X_tr, y_tr = X_train.iloc[train_idx], y_train.iloc[train_idx]
     X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
     
-    # XGBoost
+    # 1. XGBoost
     dtr_xgb = xgb.DMatrix(X_tr[xgb_features], label=y_tr, enable_categorical=True)
     dval_xgb = xgb.DMatrix(X_val[xgb_features], label=y_val, enable_categorical=True)
     xgb_m = xgb.train({"objective": "binary:logistic", "eval_metric": "aucpr", "learning_rate": 0.08, "max_depth": 6, "subsample": 0.8, "colsample_bytree": 0.8, "seed": 42+fold, "tree_method": "hist", "verbosity": 0}, dtr_xgb, 400, evals=[(dtr_xgb, 'train'), (dval_xgb, 'val')], early_stopping_rounds=50, verbose_eval=False)
     oof_xgb[val_idx] = xgb_m.predict(dval_xgb, iteration_range=(0, xgb_m.best_iteration + 1))
     test_xgb += xgb_m.predict(xgb.DMatrix(X_test[xgb_features], enable_categorical=True), iteration_range=(0, xgb_m.best_iteration + 1)) / 5
     
-    # LightGBM
+    # 2. LightGBM
     dtr_lgb = lgb.Dataset(X_tr, label=y_tr, categorical_feature=cat_features)
     dval_lgb = lgb.Dataset(X_val, label=y_val, reference=dtr_lgb, categorical_feature=cat_features)
     lgb_m = lgb.train({"objective": "binary", "metric": "average_precision", "learning_rate": 0.05, "num_leaves": 31, "max_depth": -1, "min_data_in_leaf": 20, "random_state": 42+fold, "n_jobs": -1, "verbose": -1}, dtr_lgb, 600, valid_sets=[dtr_lgb, dval_lgb], callbacks=[lgb.early_stopping(50, verbose=False)])
     oof_lgb[val_idx] = lgb_m.predict(X_val, num_iteration=lgb_m.best_iteration)
     test_lgb += lgb_m.predict(X_test, num_iteration=lgb_m.best_iteration) / 5
     
-    # CatBoost
+    # 3. CatBoost
     cb_m = CatBoostClassifier(iterations=1000, learning_rate=0.08, depth=6, eval_metric='AUC', random_seed=42+fold, verbose=0, early_stopping_rounds=50)
     cb_m.fit(X_tr[cb_features], y_tr, eval_set=(X_val[cb_features], y_val), cat_features=["operation"])
     oof_cb[val_idx] = cb_m.predict_proba(X_val[cb_features])[:, 1]
     test_cb += cb_m.predict_proba(X_test[cb_features])[:, 1] / 5
 
+# --- Mélange linéaire optimisé par Scipy (SLSQP) ---
 def neg_ap(weights):
     w = weights / np.sum(weights)
     blend = w[0] * oof_xgb + w[1] * oof_lgb + w[2] * oof_cb
@@ -233,10 +238,10 @@ def neg_ap(weights):
 
 res = minimize(neg_ap, x0=[0.33, 0.34, 0.33], method='SLSQP', bounds=[(0,1),(0,1),(0,1)], constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
 w1 = res.x / np.sum(res.x)
-print(f"Weights: XGB={w1[0]:.3f}, LGB={w1[1]:.3f}, CB={w1[2]:.3f} => OOF PR-AUC={-res.fun:.5f}")
+print(f"Poids optimisés : XGB={w1[0]:.3f}, LGB={w1[1]:.3f}, CB={w1[2]:.3f} => OOF PR-AUC={-res.fun:.5f}")
 final_pred = w1[0]*test_xgb + w1[1]*test_lgb + w1[2]*test_cb
 
-# Force non-op_03 to 0.0
+# Post-processing : forcer à 0.0 les prédictions pour toutes les opérations qui ne sont pas de type 'op_03'
 is_not_op3_test = (X_test['operation'] != 'op_03')
 final_pred[is_not_op3_test] = 0.0
 
@@ -246,4 +251,5 @@ submission = orig_test[['id']].merge(pred_df, on='id', how='left')
 submission.loc[(orig_test['operation'] != 'op_03'), 'target'] = 0.0
 
 submission.to_csv("submission.csv", index=False)
-print(f"\nSubmission saved! Total time: {time.time()-t0:.0f}s")
+print(f"\nSoumission enregistrée ! Temps total : {time.time()-t0:.0f}s")
+

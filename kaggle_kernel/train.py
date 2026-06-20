@@ -13,8 +13,9 @@ t0 = time.time()
 print("=== V8: Train on ALL data + High-Cardinality Categoricals + Advanced Features ===")
 
 # ============================================================
-# LOAD DATA
+# CHARGEMENT DES DONNÉES
 # ============================================================
+# Détermination du chemin d'accès aux fichiers de données (Kaggle ou local)
 if os.path.exists("/kaggle/input/datasets/octavebahoun/dataset"):
     train_raw = pd.read_csv("/kaggle/input/datasets/octavebahoun/dataset/train.csv")
     test_raw = pd.read_csv("/kaggle/input/datasets/octavebahoun/dataset/test.csv")
@@ -23,9 +24,11 @@ else:
     test_raw = pd.read_csv("dataset/test.csv")
 print(f"Train: {train_raw.shape}, Test: {test_raw.shape}")
 
+# Tri des transactions selon leur ordre chronologique
 train_raw = train_raw.sort_values('period').reset_index(drop=True)
 test_raw = test_raw.sort_values('period').reset_index(drop=True)
 
+# Ajout d'indicateurs de partition avant la fusion pour traitement homogène
 train_raw['is_test'] = 0
 test_raw['is_test'] = 1
 test_raw['fraud_flag'] = np.nan
@@ -34,16 +37,26 @@ combined = pd.concat([train_raw, test_raw], axis=0).sort_values('period').reset_
 eps = 1e-6
 
 # ============================================================
-# CHRONOLOGICAL TARGET ENCODING (leak-free chronologically)
+# TARGET ENCODING CHRONOLOGIQUE (ANTI-DATA LEAKAGE)
 # ============================================================
 def compute_chronological_te(df, group_col, target_col, smoothing=10):
+    """
+    Calcule le Target Encoding chronologique en décalant d'une période (shift(1))
+    les statistiques cumulées d'un groupe pour s'assurer que les informations
+    futures ne fuitent pas dans les variables prédictives passées.
+    """
     period_stats = df.groupby([group_col, 'period'])[target_col].agg(['sum', 'count']).reset_index()
     period_stats = period_stats.sort_values([group_col, 'period'])
+    
+    # Calcul des cumulés groupe
     period_stats['cum_sum'] = period_stats.groupby(group_col)['sum'].cumsum()
     period_stats['cum_count'] = period_stats.groupby(group_col)['count'].cumsum()
+    
+    # Décalage d'un pli temporel
     period_stats['prev_cum_sum'] = period_stats.groupby(group_col)['cum_sum'].shift(1).fillna(0)
     period_stats['prev_cum_count'] = period_stats.groupby(group_col)['cum_count'].shift(1).fillna(0)
     
+    # Calcul des cumulés globaux pour l'ajustement global
     global_period_stats = df.groupby('period')[target_col].agg(['sum', 'count']).reset_index()
     global_period_stats = global_period_stats.sort_values('period')
     global_period_stats['cum_sum'] = global_period_stats['sum'].cumsum()
@@ -52,36 +65,50 @@ def compute_chronological_te(df, group_col, target_col, smoothing=10):
     global_period_stats['prev_cum_count'] = global_period_stats['cum_count'].shift(1).fillna(0)
     
     global_period_stats['global_mean'] = (global_period_stats['prev_cum_sum'] + 1e-5) / (global_period_stats['prev_cum_count'] + 1e-5)
+    
+    # Fusion des données et lissage
     period_stats = period_stats.merge(global_period_stats[['period', 'global_mean']], on='period', how='left')
     period_stats['te'] = (period_stats['prev_cum_sum'] + period_stats['global_mean'] * smoothing) / (period_stats['prev_cum_count'] + smoothing)
+    
     df_merged = df.merge(period_stats[[group_col, 'period', 'te']], on=[group_col, 'period'], how='left')
     return df_merged['te']
 
 # ============================================================
-# FEATURE ENGINEERING
+# INGÉNIERIE DES CARACTÉRISTIQUES (V8 BASE SYSTEM)
 # ============================================================
 print("Building features...")
 
+# Transformation logarithmique des montants financiers
 combined["amount_log1p"] = np.log1p(np.maximum(combined["amount"], 0))
+
+# Calcul des variations réelles de soldes
 combined["origin_balance_change"] = combined["origin_balance_after"] - combined["origin_balance_before"]
 combined["destination_balance_change"] = combined["destination_balance_after"] - combined["destination_balance_before"]
+
+# Ratios des montants de transactions par rapport aux soldes initiaux
 combined["amount_to_origin_before"] = combined["amount"] / (np.abs(combined["origin_balance_before"]) + eps)
 combined["amount_to_destination_before"] = combined["amount"] / (np.abs(combined["destination_balance_before"]) + eps)
+
+# Variables booléennes de stagnation des soldes (compte source ou cible)
 combined["origin_no_change"] = (combined["origin_balance_change"].abs() < 0.1).astype(int)
 combined["destination_no_change"] = (combined["destination_balance_change"].abs() < 0.1).astype(int)
+
+# Détection des transactions vidant exactement le solde de l'émetteur
 combined["amount_equals_origin_before"] = ((combined["amount"] - combined["origin_balance_before"]).abs() < 0.1).astype(int)
 
+# Indexations d'activité cumulées par compte
 combined['orig_tx_idx'] = combined.groupby('origin_account').cumcount()
 combined['dest_tx_idx'] = combined.groupby('destination_account').cumcount()
 combined['orig_cum_amount'] = combined.groupby('origin_account')['amount'].cumsum() - combined['amount']
 combined['dest_cum_amount'] = combined.groupby('destination_account')['amount'].cumsum() - combined['amount']
 
+# Différences de temps par rapport aux transactions précédentes (lags 1 à 3)
 for lag in [1, 2, 3]:
     suffix = '' if lag == 1 else f'_{lag}'
     combined[f'orig_time_diff{suffix}'] = (combined['period'] - combined.groupby('origin_account')['period'].shift(lag)).fillna(999)
     combined[f'dest_time_diff{suffix}'] = (combined['period'] - combined.groupby('destination_account')['period'].shift(lag)).fillna(999)
 
-# Origin per-period stats
+# Statistiques historiques glissantes pour l'émetteur
 orig_period = combined.groupby(['origin_account', 'period']).agg(
     orig_period_tx_count=('amount', 'count'),
     orig_period_amount_sum=('amount', 'sum'),
@@ -91,7 +118,7 @@ orig_period['orig_cum_tx_count'] = orig_period.groupby('origin_account')['orig_p
 orig_period['orig_cum_amount_sum'] = orig_period.groupby('origin_account')['orig_period_amount_sum'].cumsum().groupby(orig_period['origin_account']).shift(1).fillna(0)
 combined = combined.merge(orig_period[['origin_account', 'period', 'orig_cum_tx_count', 'orig_cum_amount_sum']], on=['origin_account', 'period'], how='left')
 
-# Destination per-period stats
+# Statistiques historiques glissantes pour le destinataire
 dest_period = combined.groupby(['destination_account', 'period']).agg(
     dest_period_tx_count=('amount', 'count'),
     dest_period_amount_sum=('amount', 'sum'),
@@ -101,12 +128,13 @@ dest_period['dest_cum_tx_count'] = dest_period.groupby('destination_account')['d
 dest_period['dest_cum_amount_sum'] = dest_period.groupby('destination_account')['dest_period_amount_sum'].cumsum().groupby(dest_period['destination_account']).shift(1).fillna(0)
 combined = combined.merge(dest_period[['destination_account', 'period', 'dest_cum_tx_count', 'dest_cum_amount_sum']], on=['destination_account', 'period'], how='left')
 
+# Comparaison du montant actuel par rapport à la moyenne historique des comptes
 combined['orig_avg_amount'] = combined['orig_cum_amount_sum'] / (combined['orig_cum_tx_count'] + 1)
 combined['dest_avg_amount'] = combined['dest_cum_amount_sum'] / (combined['dest_cum_tx_count'] + 1)
 combined['amount_vs_orig_avg'] = combined['amount'] / (combined['orig_avg_amount'] + eps)
 combined['amount_vs_dest_avg'] = combined['amount'] / (combined['dest_avg_amount'] + eps)
 
-# Network features
+# Variables de réseau : Nombre de partenaires d'échange cumulés
 orig_dest_counts = combined.groupby(['origin_account', 'period'])['destination_account'].nunique().reset_index()
 orig_dest_counts.columns = ['origin_account', 'period', 'orig_unique_dests_this_period']
 orig_dest_counts = orig_dest_counts.sort_values(['origin_account', 'period'])
@@ -119,26 +147,30 @@ dest_orig_counts = dest_orig_counts.sort_values(['destination_account', 'period'
 dest_orig_counts['dest_cum_unique_origins'] = dest_orig_counts.groupby('destination_account')['dest_unique_origins_this_period'].cumsum().groupby(dest_orig_counts['destination_account']).shift(1).fillna(0)
 combined = combined.merge(dest_orig_counts[['destination_account', 'period', 'dest_cum_unique_origins']], on=['destination_account', 'period'], how='left')
 
+# Ratios financiers de balances
 combined['origin_balance_ratio'] = combined['origin_balance_after'] / (combined['origin_balance_before'] + eps)
 combined['dest_balance_ratio'] = combined['destination_balance_after'] / (combined['destination_balance_before'] + eps)
 
+# Vitesses de transfert (Montant / Temps)
 combined['amount_velocity_orig'] = combined['amount'] / (combined['orig_time_diff'] + eps)
 combined['amount_velocity_dest'] = combined['amount'] / (combined['dest_time_diff'] + eps)
 
-# Target Encodings
+# Calcul des target encodings chronologiques
 print("Computing target encodings...")
 combined['origin_te'] = compute_chronological_te(combined, 'origin_account', 'fraud_flag', smoothing=10)
 combined['destination_te'] = compute_chronological_te(combined, 'destination_account', 'fraud_flag', smoothing=10)
 
+# Interactions spécifiques avec l'opération op_03 (seule porteuse de fraudes)
 combined['is_op3'] = (combined['operation'] == 'op_03').astype(int)
 combined['op3_orig_no_change'] = (combined['is_op3'] & combined['origin_no_change']).astype(int)
 combined['op3_dest_no_change'] = (combined['is_op3'] & combined['destination_no_change']).astype(int)
 
+# Typage des variables catégorielles
 combined['operation'] = combined['operation'].astype('category')
 combined['origin_account'] = combined['origin_account'].astype('category')
 combined['destination_account'] = combined['destination_account'].astype('category')
 
-# SPLIT BACK
+# Séparation des jeux train et test post-feature engineering
 train_fe = combined[combined['is_test'] == 0].copy().drop(columns=['is_test'])
 test_fe = combined[combined['is_test'] == 1].copy().drop(columns=['is_test'])
 del combined; gc.collect()
@@ -165,14 +197,14 @@ features = [
 ]
 
 cat_features = ["operation", "origin_account", "destination_account"]
-# Drop high-cardinality features for CatBoost to avoid slowdown
+# Exclusion des identifiants à haute cardinalité pour CatBoost (évite l'explosion mémoire)
 cb_features = [f for f in features if f not in ["origin_account", "destination_account"]]
 
 X_train = train_fe[features].reset_index(drop=True)
 y_train = train_fe["fraud_flag"].reset_index(drop=True)
 X_test = test_fe[features].reset_index(drop=True)
 
-# We train on ALL DATA (no filtering to op_03) just like the successful 0.3537 script
+# Entraînement sur la totalité des données (pas de pré-filtrage de op_03 pour l'entraînement global)
 print(f"Training set: {len(X_train)} rows, fraud rate: {y_train.mean():.4f}")
 
 n_splits = 5
@@ -311,6 +343,7 @@ opt_w = res.x / np.sum(res.x)
 opt_ap = -res.fun
 print(f"Scipy refined: XGB={opt_w[0]:.4f}, LGB={opt_w[1]:.4f}, CB={opt_w[2]:.4f} => PR-AUC={opt_ap:.6f}")
 
+# Sélection des meilleurs coefficients de mélange (grid search vs scipy)
 final_w = opt_w if opt_ap >= best_ap else np.array(best_w)
 final_pred = final_w[0] * test_xgb + final_w[1] * test_lgb + final_w[2] * test_cb
 
@@ -324,6 +357,7 @@ else:
 
 submission = orig_test[['id']].merge(pred_df, on='id', how='left')
 
+# Post-processing : forcer toutes les transactions hors op_03 à 0.0
 print("Applying post-processing (non-op_03 = 0)...")
 is_not_op3 = (orig_test['operation'] != 'op_03')
 submission.loc[is_not_op3, 'target'] = 0.0

@@ -13,8 +13,9 @@ t0 = time.time()
 print("=== V9: Advanced Features (Mules, Ratios) + Optuna Tuning ===")
 
 # ============================================================
-# LOAD DATA
+# CHARGEMENT DES DONNÉES
 # ============================================================
+# Localisation du jeu de données (Kaggle ou environnement local)
 if os.path.exists("/kaggle/input/datasets/octavebahoun/dataset"):
     train_raw = pd.read_csv("/kaggle/input/datasets/octavebahoun/dataset/train.csv")
     test_raw = pd.read_csv("/kaggle/input/datasets/octavebahoun/dataset/test.csv")
@@ -23,9 +24,11 @@ else:
     test_raw = pd.read_csv("dataset/test.csv")
 print(f"Train: {train_raw.shape}, Test: {test_raw.shape}")
 
+# Tri temporel pour respecter la chronologie des transactions
 train_raw = train_raw.sort_values('period').reset_index(drop=True)
 test_raw = test_raw.sort_values('period').reset_index(drop=True)
 
+# Alignement des structures pour le feature engineering conjoint
 train_raw['is_test'] = 0
 test_raw['is_test'] = 1
 test_raw['fraud_flag'] = np.nan
@@ -34,16 +37,26 @@ combined = pd.concat([train_raw, test_raw], axis=0).sort_values('period').reset_
 eps = 1e-5
 
 # ============================================================
-# CHRONOLOGICAL TARGET ENCODING (leak-free chronologically)
+# TARGET ENCODING CHRONOLOGIQUE (ANTI-DATA LEAKAGE)
 # ============================================================
 def compute_chronological_te(df, group_col, target_col, smoothing=10):
+    """
+    Calcule le Target Encoding chronologique en décalant d'une période (shift(1))
+    les statistiques cumulées d'un groupe pour s'assurer que les informations
+    futures ne fuitent pas dans les variables prédictives passées.
+    """
     period_stats = df.groupby([group_col, 'period'])[target_col].agg(['sum', 'count']).reset_index()
     period_stats = period_stats.sort_values([group_col, 'period'])
+    
+    # Calcul des cumulés groupe
     period_stats['cum_sum'] = period_stats.groupby(group_col)['sum'].cumsum()
     period_stats['cum_count'] = period_stats.groupby(group_col)['count'].cumsum()
+    
+    # Décalage d'un pli temporel
     period_stats['prev_cum_sum'] = period_stats.groupby(group_col)['cum_sum'].shift(1).fillna(0)
     period_stats['prev_cum_count'] = period_stats.groupby(group_col)['cum_count'].shift(1).fillna(0)
     
+    # Calcul des cumulés globaux pour l'ajustement global
     global_period_stats = df.groupby('period')[target_col].agg(['sum', 'count']).reset_index()
     global_period_stats = global_period_stats.sort_values('period')
     global_period_stats['cum_sum'] = global_period_stats['sum'].cumsum()
@@ -52,35 +65,48 @@ def compute_chronological_te(df, group_col, target_col, smoothing=10):
     global_period_stats['prev_cum_count'] = global_period_stats['cum_count'].shift(1).fillna(0)
     
     global_period_stats['global_mean'] = (global_period_stats['prev_cum_sum'] + 1e-5) / (global_period_stats['prev_cum_count'] + 1e-5)
+    
+    # Fusion des données et lissage
     period_stats = period_stats.merge(global_period_stats[['period', 'global_mean']], on='period', how='left')
     period_stats['te'] = (period_stats['prev_cum_sum'] + period_stats['global_mean'] * smoothing) / (period_stats['prev_cum_count'] + smoothing)
+    
     df_merged = df.merge(period_stats[[group_col, 'period', 'te']], on=[group_col, 'period'], how='left')
     return df_merged['te']
 
 # ============================================================
-# FEATURE ENGINEERING
+# INGÉNIERIE DES CARACTÉRISTIQUES DE BASE
 # ============================================================
 print("Building base features...")
+# Montants à l'échelle logarithmique
 combined["amount_log1p"] = np.log1p(np.maximum(combined["amount"], 0))
+
+# Différences absolues de solde
 combined["origin_balance_change"] = combined["origin_balance_after"] - combined["origin_balance_before"]
 combined["destination_balance_change"] = combined["destination_balance_after"] - combined["destination_balance_before"]
+
+# Ratios des montants de transactions sur solde initial
 combined["amount_to_origin_before"] = combined["amount"] / (np.abs(combined["origin_balance_before"]) + eps)
 combined["amount_to_destination_before"] = combined["amount"] / (np.abs(combined["destination_balance_before"]) + eps)
+
+# Variables de détection d'absence de variation de solde
 combined["origin_no_change"] = (combined["origin_balance_change"].abs() < 0.1).astype(int)
 combined["destination_no_change"] = (combined["destination_balance_change"].abs() < 0.1).astype(int)
 
-# Time diffs
+# Index cumulés d'activité par compte
 combined['orig_tx_idx'] = combined.groupby('origin_account').cumcount()
 combined['dest_tx_idx'] = combined.groupby('destination_account').cumcount()
 
+# Différences de temps par rapport aux transactions antérieures (lags 1 à 2)
 for lag in [1, 2]:
     suffix = '' if lag == 1 else f'_{lag}'
     combined[f'orig_time_diff{suffix}'] = (combined['period'] - combined.groupby('origin_account')['period'].shift(lag)).fillna(999)
     combined[f'dest_time_diff{suffix}'] = (combined['period'] - combined.groupby('destination_account')['period'].shift(lag)).fillna(999)
 
+# Vitesse transactionnelle (Montant / Temps écoulé)
 combined['amount_velocity_orig'] = combined['amount'] / (combined['orig_time_diff'] + eps)
 combined['amount_velocity_dest'] = combined['amount'] / (combined['dest_time_diff'] + eps)
 
+# Caractéristiques réseau basées sur les partenaires d'échange
 print("Building network features...")
 orig_dest_counts = combined.groupby(['origin_account', 'period'])['destination_account'].nunique().reset_index()
 orig_dest_counts.columns = ['origin_account', 'period', 'orig_unique_dests_this_period']
@@ -95,54 +121,64 @@ dest_orig_counts['dest_cum_unique_origins'] = dest_orig_counts.groupby('destinat
 combined = combined.merge(dest_orig_counts[['destination_account', 'period', 'dest_cum_unique_origins']], on=['destination_account', 'period'], how='left')
 
 # ============================================================
-# NEW: MULE DETECTION (Sent vs Received)
+# DÉTECTION DE COMPTES MULES (FLUX SORTANTS VS ENTRANTS)
 # ============================================================
 print("Building Mule Ratio features...")
+# Somme des montants envoyés par compte et par période
 sender_agg = combined.groupby(['origin_account', 'period'])['amount'].sum().reset_index()
 sender_agg.rename(columns={'origin_account': 'account', 'amount': 'sent_amount'}, inplace=True)
+
+# Somme des montants reçus par compte et par période
 receiver_agg = combined.groupby(['destination_account', 'period'])['amount'].sum().reset_index()
 receiver_agg.rename(columns={'destination_account': 'account', 'amount': 'received_amount'}, inplace=True)
 
+# Fusion temporelle par compte
 account_period = pd.merge(sender_agg, receiver_agg, on=['account', 'period'], how='outer').fillna(0)
 account_period = account_period.sort_values(['account', 'period'])
+
+# Cumul historique des flux entrants et sortants
 account_period['cum_sent'] = account_period.groupby('account')['sent_amount'].cumsum()
 account_period['cum_received'] = account_period.groupby('account')['received_amount'].cumsum()
 
-# Shift by 1 to strictly prevent leaks
+# Décalage temporel d'une période (shift(1)) pour éviter strictement toute fuite de données
 account_period['cum_sent_past'] = account_period.groupby('account')['cum_sent'].shift(1).fillna(0)
 account_period['cum_received_past'] = account_period.groupby('account')['cum_received'].shift(1).fillna(0)
 
+# Association des métriques de flux passés aux émetteurs
 combined = combined.merge(
     account_period[['account', 'period', 'cum_sent_past', 'cum_received_past']].rename(
         columns={'account': 'origin_account', 'cum_sent_past': 'orig_cum_sent_past', 'cum_received_past': 'orig_cum_received_past'}
     ), on=['origin_account', 'period'], how='left'
 )
+
+# Association des métriques de flux passés aux destinataires
 combined = combined.merge(
     account_period[['account', 'period', 'cum_sent_past', 'cum_received_past']].rename(
         columns={'account': 'destination_account', 'cum_sent_past': 'dest_cum_sent_past', 'cum_received_past': 'dest_cum_received_past'}
     ), on=['destination_account', 'period'], how='left'
 )
 
-# Mule ratios (Received / Sent) - close to 1.0 means pass-through
+# Ratios de mule (Reçu / Envoyé) : Un ratio proche de 1.0 indique un compte de transit (mule)
 combined['orig_mule_ratio'] = combined['orig_cum_received_past'] / (combined['orig_cum_sent_past'] + eps)
 combined['dest_mule_ratio'] = combined['dest_cum_received_past'] / (combined['dest_cum_sent_past'] + eps)
 
-# Balances Ratios
+# Ratios des soldes avant/après transaction
 combined['origin_balance_ratio'] = combined['origin_balance_after'] / (combined['origin_balance_before'] + eps)
 combined['dest_balance_ratio'] = combined['destination_balance_after'] / (combined['destination_balance_before'] + eps)
 
-# Target Encodings
+# Encodages cibles chronologiques
 print("Computing target encodings...")
 combined['origin_te'] = compute_chronological_te(combined, 'origin_account', 'fraud_flag', smoothing=10)
 combined['destination_te'] = compute_chronological_te(combined, 'destination_account', 'fraud_flag', smoothing=10)
 
 combined['is_op3'] = (combined['operation'] == 'op_03').astype(int)
 
-# Categories
+# Conversion catégorielle
 combined['operation'] = combined['operation'].astype('category')
 combined['origin_account'] = combined['origin_account'].astype('category')
 combined['destination_account'] = combined['destination_account'].astype('category')
 
+# Découpage final des ensembles train et test
 train_fe = combined[combined['is_test'] == 0].copy().drop(columns=['is_test'])
 test_fe = combined[combined['is_test'] == 1].copy().drop(columns=['is_test'])
 del combined, account_period, sender_agg, receiver_agg; gc.collect()
@@ -175,11 +211,11 @@ n_splits = 5
 skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
 # ============================================================
-# OPTUNA TUNING (LightGBM only to save time)
+# OPTIMISATION DES HYPERPARAMÈTRES AVEC OPTUNA (LightGBM)
 # ============================================================
 print("\n=== OPTUNA Tuning for LightGBM ===")
 def objective(trial):
-    # Hyperparameters to tune
+    # Paramètres de recherche de l'étude Optuna
     param = {
         "objective": "binary",
         "metric": "average_precision",
@@ -198,7 +234,7 @@ def objective(trial):
         "verbose": -1
     }
     
-    # Use only 3 folds for faster tuning
+    # Utilisation de 3 plis pour accélérer le processus de tuning
     fast_skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
     scores = []
     
@@ -220,7 +256,7 @@ def objective(trial):
         
     return np.mean(scores)
 
-# Limit to 15 trials due to time constraints in Kaggle, but it will find a good baseline.
+# Limitation à 15 essais (trials) en raison des contraintes temporelles
 study = optuna.create_study(direction="maximize")
 study.optimize(objective, n_trials=15)
 
@@ -236,7 +272,7 @@ best_lgb_params.update({
 })
 
 # ============================================================
-# FINAL TRAINING (XGB + Best LGBM)
+# APPRENTISSAGE FINAL (XGBoost + LightGBM optimisé)
 # ============================================================
 print(f"\n=== Starting {n_splits}-Fold CV ===")
 oof_xgb = np.zeros(len(X_train))
@@ -251,7 +287,7 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
     X_tr, y_tr = X_train.iloc[train_idx], y_train.iloc[train_idx]
     X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
     
-    # XGBoost
+    # Entraînement de XGBoost
     print(f"  XGBoost...")
     dtr_xgb = xgb.DMatrix(X_tr, label=y_tr, enable_categorical=True)
     dval_xgb = xgb.DMatrix(X_val, label=y_val, enable_categorical=True)
@@ -267,7 +303,7 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
     oof_xgb[val_idx] = xgb_model.predict(dval_xgb, iteration_range=(0, xgb_model.best_iteration + 1))
     test_xgb += xgb_model.predict(dtest_xgb, iteration_range=(0, xgb_model.best_iteration + 1)) / n_splits
     
-    # LightGBM (Optuned)
+    # Entraînement de LightGBM (avec hyperparamètres optimisés par Optuna)
     print(f"  LightGBM...")
     dtr_lgb = lgb.Dataset(X_tr, label=y_tr, categorical_feature=cat_features)
     dval_lgb = lgb.Dataset(X_val, label=y_val, reference=dtr_lgb, categorical_feature=cat_features)
@@ -296,6 +332,7 @@ opt_w = res.x / np.sum(res.x)
 opt_ap = -res.fun
 print(f"Scipy refined: XGB={opt_w[0]:.4f}, LGB={opt_w[1]:.4f} => PR-AUC={opt_ap:.6f}")
 
+# Prédiction pondérée
 final_pred = opt_w[0] * test_xgb + opt_w[1] * test_lgb
 
 print("\nAligning predictions to test file order...")
