@@ -1,12 +1,12 @@
 {
-  "id": "octavebahoun/datour-fraud-v10-pl",
-  "title": "datour-fraud-v10-pl",
+  "id": "octavebahoun/datour-fraud-v18-stack-enrich",
+  "title": "datour-fraud-v18-stack-enrich",
   "code_file": "train.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": "true",
   "enable_gpu": "false",
-  "enable_internet": "true",
+  "enable_internet": "false",
   "dataset_sources": [
     "octavebahoun/dataset"
   ],
