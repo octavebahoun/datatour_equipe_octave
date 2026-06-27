@@ -7,10 +7,11 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import average_precision_score
 from scipy.optimize import minimize
 import time, os, warnings, gc
+import networkx as nx
 warnings.filterwarnings('ignore')
 
 t0 = time.time()
-print("=== V18: Full Stack Enrichment (Orig + Dest + Edge Features) ===")
+print("=== V19: Base V17 + PageRank Centrality ===")
 
 # ============================================================
 # CHARGEMENT DES DONNÉES
@@ -77,6 +78,19 @@ combined['is_repeated_amount_on_edge'] = (combined['amount'] == combined['prev_e
 combined.drop(columns=['prev_edge_amount'], inplace=True)
 combined['edge_cum_tx_count'] = combined.groupby('edge_id').cumcount()
 combined['edge_cum_amount_sum'] = combined.groupby('edge_id')['amount'].cumsum() - combined['amount']
+
+print("Calcul du PageRank sur le graphe des transactions...")
+edges_weights = combined.groupby(['origin_account', 'destination_account'])['amount'].count().reset_index()
+edges_weights.rename(columns={'amount': 'weight'}, inplace=True)
+G = nx.from_pandas_edgelist(edges_weights, 'origin_account', 'destination_account', ['weight'], create_using=nx.DiGraph())
+pagerank_scores = nx.pagerank(G, weight='weight')
+pagerank_df = pd.DataFrame(list(pagerank_scores.items()), columns=['account', 'pagerank'])
+combined = combined.merge(pagerank_df.rename(columns={'account': 'origin_account', 'pagerank': 'orig_pagerank'}), on='origin_account', how='left')
+combined = combined.merge(pagerank_df.rename(columns={'account': 'destination_account', 'pagerank': 'dest_pagerank'}), on='destination_account', how='left')
+combined['orig_pagerank'] = combined['orig_pagerank'].fillna(0)
+combined['dest_pagerank'] = combined['dest_pagerank'].fillna(0)
+del G, edges_weights, pagerank_scores, pagerank_df; gc.collect()
+
 
 print("Calcul des caractéristiques de Rank (Optimisées OOM)...")
 orig_first_seen = combined.groupby('origin_account')['period'].transform('first')
@@ -175,7 +189,8 @@ features = [
     "amount_velocity_orig", "amount_velocity_dest",
     "edge_id", "is_round_1000", "is_round_5000", "edge_te", 
     "edge_time_diff", "is_repeated_amount_on_edge", "edge_cum_tx_count", "edge_cum_amount_sum",
-    "orig_account_age", "dest_account_age", "orig_amount_rank", "dest_amount_rank"
+    "orig_account_age", "dest_account_age", "orig_amount_rank", "dest_amount_rank",
+    "orig_pagerank", "dest_pagerank"
 ]
 
 cat_features = ["operation", "origin_account", "destination_account", "edge_id"]
@@ -235,7 +250,7 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
 # COMBINAISON (LEVEL-2) : MÉLANGE LINÉAIRE SCIPY VS STACKING LGB
 # ============================================================
 print("\n" + "="*50)
-print("NIVEAU 2 : MÉLANGE LINÉAIRE SCIPY VS FULL ENHANCED STACKING LGB")
+print("NIVEAU 2 : MÉLANGE LINÉAIRE SCIPY VS ENHANCED STACKING LGB")
 print("="*50)
 
 # --- Méthode 1 : Mélange linéaire (Blending) optimisé par Scipy ---
@@ -250,19 +265,16 @@ scipy_oof_score = -res.fun
 scipy_pred = w1[0]*test_xgb + w1[1]*test_lgb + w1[2]*test_cb
 print(f"[Scipy]  Poids : XGB={w1[0]:.3f}, LGB={w1[1]:.3f}, CB={w1[2]:.3f} => OOF PR-AUC={scipy_oof_score:.5f}")
 
-# --- Méthode 2 : Méta-Modèle LightGBM (Full Enhanced Stacking V18) ---
+# --- Méthode 2 : Méta-Modèle LightGBM (Enhanced Stacking V17) ---
 stack_train = pd.DataFrame({'xgb': oof_xgb, 'lgb': oof_lgb, 'cb': oof_cb})
 stack_test = pd.DataFrame({'xgb': test_xgb, 'lgb': test_lgb, 'cb': test_cb})
 
-# On injecte TOUTES les features V14 clés de Niveau 1
+# On injecte les features importantes de niveau 1 (sans Burst Detection)
 stack_key_feats = [
-    # Celles de la V17
     'amount', 'is_op3', 'origin_te', 'destination_te', 'edge_te',
     'orig_account_age', 'dest_account_age', 'orig_amount_rank', 'dest_amount_rank',
     'edge_time_diff', 'edge_cum_tx_count', 'amount_velocity_orig', 'orig_time_diff',
-    # Les nouvelles de la V18 (Orig/Dest/Edge manquantes)
-    'amount_velocity_dest', 'dest_time_diff', 'is_repeated_amount_on_edge', 
-    'edge_cum_amount_sum', 'is_round_1000'
+    'orig_pagerank', 'dest_pagerank'
 ]
 for f in stack_key_feats:
     stack_train[f] = X_train[f].values

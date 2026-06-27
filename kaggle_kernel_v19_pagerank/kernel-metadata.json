@@ -1,6 +1,6 @@
 {
-  "id": "octavebahoun/datour-fraud-v18-stack-enrich",
-  "title": "datour-fraud-v18-stack-enrich",
+  "id": "octavebahoun/datour-fraud-v19-pagerank",
+  "title": "datour-fraud-v19-pagerank",
   "code_file": "train.py",
   "language": "python",
   "kernel_type": "script",
